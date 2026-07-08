@@ -187,6 +187,7 @@ interface ScreenJobRecord extends ScreenJobSpec {
 interface ExperimentRunOptions {
 	name?: string;
 	jobs: ScreenJobSpec[];
+	owner_session_id?: string;
 	poll_interval_seconds?: number;
 	timeout_seconds?: number;
 	tail_lines_on_failure?: number;
@@ -221,7 +222,7 @@ async function screenSessions(): Promise<Set<string>> {
 	}
 }
 
-async function launchScreenBatch(cwd: string, jobs: ScreenJobSpec[]): Promise<{
+async function launchScreenBatch(cwd: string, jobs: ScreenJobSpec[], ownerSessionId?: string): Promise<{
 	run_id: string;
 	run_dir: string;
 	jobs: ScreenJobRecord[];
@@ -267,7 +268,7 @@ async function launchScreenBatch(cwd: string, jobs: ScreenJobSpec[]): Promise<{
 
 	await writeFile(
 		join(runDir, "jobs.json"),
-		`${JSON.stringify({ run_id: runId, created_at: now(), jobs: records }, null, 2)}\n`,
+		`${JSON.stringify({ run_id: runId, created_at: now(), owner_session_id: ownerSessionId, jobs: records }, null, 2)}\n`,
 		"utf8",
 	);
 	await refreshExperimentsLedger(cwd);
@@ -374,7 +375,7 @@ async function launchExperimentRun(cwd: string, options: ExperimentRunOptions): 
 	summary_path: string;
 	jobs: ScreenJobRecord[];
 }> {
-	const result = await launchScreenBatch(cwd, options.jobs);
+	const result = await launchScreenBatch(cwd, options.jobs, options.owner_session_id);
 	const absoluteRunDir = resolve(cwd, result.run_dir);
 	const safeName = safeScreenName(options.name ?? "experiment");
 	const monitorSession = safeScreenName(`dev-${projectName(cwd)}-${result.run_id}-monitor-${safeName}`);
@@ -808,7 +809,7 @@ export default function devOrchestratorExtension(pi: ExtensionAPI): void {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const result = await launchScreenBatch(ctx.cwd, params.jobs as ScreenJobSpec[]);
+			const result = await launchScreenBatch(ctx.cwd, params.jobs as ScreenJobSpec[], ctx.sessionManager.getSessionId());
 			return {
 				content: [
 					{
@@ -850,7 +851,7 @@ export default function devOrchestratorExtension(pi: ExtensionAPI): void {
 			progress_interval_percent: Type.Optional(Type.Number({ description: "Monitor writes PROGRESS.md at this percent interval; default 10." })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const result = await launchExperimentRun(ctx.cwd, params as ExperimentRunOptions);
+			const result = await launchExperimentRun(ctx.cwd, { ...(params as ExperimentRunOptions), owner_session_id: ctx.sessionManager.getSessionId() });
 			return {
 				content: [
 					{
